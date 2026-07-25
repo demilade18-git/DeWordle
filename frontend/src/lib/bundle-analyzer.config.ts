@@ -1,13 +1,17 @@
 /**
  * PERF-106: Frontend bundle analysis and size optimization.
- * next.config.ts integration snippet — wraps the config with bundle analyzer.
+ * Utility wrapper — apply in next.config.ts to enable bundle analysis.
  *
  * Install: npm install @next/bundle-analyzer --save-dev
  * Run:     ANALYZE=true npm run build
  */
-const withBundleAnalyzer =
-  process.env.ANALYZE === 'true'
-    ? require('@next/bundle-analyzer')({ enabled: true })
-    : (config: unknown) => config;
+import type { NextConfig } from 'next';
 
-module.exports = withBundleAnalyzer;
+export function withBundleAnalyzer(config: NextConfig): NextConfig {
+  if (process.env.ANALYZE !== 'true') return config;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const analyzer = require('@next/bundle-analyzer') as (
+    opts: { enabled: boolean }
+  ) => (c: NextConfig) => NextConfig;
+  return analyzer({ enabled: true })(config);
+}
