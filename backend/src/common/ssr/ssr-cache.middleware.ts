@@ -6,9 +6,6 @@ import { createHash } from 'crypto';
  * PERF-107: Server-side rendering optimization for critical pages.
  * In-memory SSR response cache with TTL to avoid redundant re-renders
  * for public, non-personalised pages (home, leaderboard, word-of-the-day).
- *
- * This middleware is designed to be mounted on the Next.js server handler
- * or used as a NestJS proxy layer for SSR routes.
  */
 
 interface CacheEntry {
@@ -24,7 +21,6 @@ const DEFAULT_TTL_MS = 60_000; // 60 seconds
 @Injectable()
 export class SsrCacheMiddleware implements NestMiddleware {
   use(req: Request, res: Response, next: NextFunction): void {
-    // Only cache GET requests for public SSR pages
     if (req.method !== 'GET') return next();
     const cacheable = ['/leaderboard', '/about'].some((p) => req.path.startsWith(p));
     if (!cacheable) return next();
@@ -39,18 +35,24 @@ export class SsrCacheMiddleware implements NestMiddleware {
       return;
     }
 
-    // Intercept the response to store it
     const chunks: Buffer[] = [];
-    const originalWrite = res.write.bind(res) as typeof res.write;
-    const originalEnd = res.end.bind(res) as typeof res.end;
+    const originalWrite = res.write.bind(res);
+    const originalEnd = res.end.bind(res);
 
-    res.write = (...args: Parameters<typeof res.write>): boolean => {
-      if (args[0]) chunks.push(Buffer.isBuffer(args[0]) ? args[0] : Buffer.from(args[0] as string));
-      return originalWrite(...args);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (res as any).write = function (chunk: any, encoding?: any, callback?: any): boolean {
+      if (chunk) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (originalWrite as any)(chunk, encoding, callback);
     };
 
-    res.end = (...args: Parameters<typeof res.end>): Response => {
-      if (args[0]) chunks.push(Buffer.isBuffer(args[0]) ? args[0] : Buffer.from(args[0] as string));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (res as any).end = function (chunk?: any, encoding?: any, callback?: any): Response {
+      if (chunk && typeof chunk !== 'function') {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+      }
       if (res.statusCode < 400) {
         const headers: Record<string, string | string[]> = {};
         ['content-type', 'cache-control', 'vary'].forEach((h) => {
@@ -65,7 +67,8 @@ export class SsrCacheMiddleware implements NestMiddleware {
         });
       }
       res.set('X-Cache', 'MISS');
-      return originalEnd(...args);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (originalEnd as any)(chunk, encoding, callback);
     };
 
     next();
